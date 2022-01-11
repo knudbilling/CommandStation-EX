@@ -37,6 +37,7 @@
 #include "CommandDistributor.h"
 #include "EEStore.h"
 #include "DIAG.h"
+#include "RMFT2.h"
 #include <avr/wdt.h>
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -508,6 +509,19 @@ void DCCEXParser::parse(Print *stream, byte *com, RingStream * ringStream)
           return;
         }
         break;
+
+    case 'J': // Roster getter
+#ifdef RMFT_ACTIVE
+        if(params==0) {
+            RMFT2::emitTagThrottleRoster(stream,0);
+            return;
+        }
+        if(params==1) {
+            RMFT2::emitTagThrottleRoster(stream,p[0]);
+            return;
+        }
+#endif
+        break; 
 
     default: //anything else will diagnose and drop out to <X>
         DIAG(F("Opcode=%c params=%d"), opcode, params);

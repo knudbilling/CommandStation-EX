@@ -132,12 +132,25 @@ void RMFT2::emitWithrottleRoster(Print * stream) {
         stream->write('\n');        
 }
 
+// Pass 6a: Roster names emitter
+#include "RMFT2MacroReset.h"
+#undef ROSTER
+#define ROSTER(cabid,name,funcmap...) if (id==0 || id==cabid) StringFormatter::send(stream,(FSH *)format,cabid,F(name),functionmap);
+void RMFT2::emitTagThrottleRoster(Print * stream, int16_t id) {
+        static const char formatAll[] FLASH ="<j %d \"%S\">\n";
+        static const char formatOne[] FLASH ="<j %d \"%S\" \"%S\">\n";
+        const char * format=id?formatOne:formatAll;
+        const FSH * functionmap=getRosterFunctions(id);
+        #include "myAutomation.h"
+}
+
 // Pass 7: functions getter
 #include "RMFT2MacroReset.h"
 #undef ROSTER
 #define ROSTER(cabid,name,funcmap...) case cabid: return F("" funcmap);
 const FSH *  RMFT2::getRosterFunctions(int16_t cabid) {
    switch(cabid) {
+      case 0: return NULL;
       #include "myAutomation.h"
       default: return NULL;
    }        
