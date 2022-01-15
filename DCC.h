@@ -4,6 +4,7 @@
  *  © 2021 Herb Morton
  *  © 2020-2021 Harald Barth
  *  © 2020-2021 Chris Harlow
+ *  © 2022 Knud Billing
  *  All rights reserved.
  *  
  *  This file is part of Asbelos DCC API
@@ -165,6 +166,7 @@ private:
   static int lookupSpeedTable(int locoId);
   static void issueReminders();
   static void callback(int value);
+  static void issueCVPacket(byte op, byte instruction);
 
   // ACK MANAGER
   static ackOp const *ackManagerProg;

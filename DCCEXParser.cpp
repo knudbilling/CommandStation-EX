@@ -6,6 +6,7 @@
  *  © 2020-2021 M Steve Todd
  *  © 2020-2021 Fred Decker
  *  © 2020-2021 Chris Harlow
+ *  © 2022 Knud Billing
  *  All rights reserved.
  *  
  *  This file is part of CommandStation-EX
@@ -38,6 +39,7 @@
 #include "EEStore.h"
 #include "DIAG.h"
 #include <avr/wdt.h>
+#include "DCCPacket.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 //
@@ -319,12 +321,13 @@ void DCCEXParser::parse(Print *stream, byte *com, RingStream * ringStream)
         params--; // drop REG
         if (params<1) break;  
         {
-          byte packet[params];
-          for (int i=0;i<params;i++) {
-            packet[i]=(byte)p[i+1];
-            if (Diag::CMD) DIAG(F("packet[%d]=%d (0x%x)"), i, packet[i], packet[i]);
+          DCCPacket dccPacket;
+          for (int i = 0; i < params; i++) 
+          {
+            dccPacket.add_byte((byte)p[i + 1]);
+            if (Diag::CMD) DIAG(F("packet[%d]=%d (0x%x)"), i, p[i + 1], p[i + 1]);
           }
-          (opcode=='M'?DCCWaveform::mainTrack:DCCWaveform::progTrack).schedulePacket(packet,params,3);  
+          (opcode == 'M' ? DCCWaveform::mainTrack : DCCWaveform::progTrack).schedulePacket(&dccPacket, 3);  
         }
         return;
         

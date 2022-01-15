@@ -6,6 +6,7 @@
  *  © 2020-2022 Harald Barth
  *  © 2020-2021 M Steve Todd
  *  © 2020-2021 Chris Harlow
+ *  © 2022 Knud Billing
  *  All rights reserved.
  *
  *  This file is part of Asbelos DCC API
@@ -35,6 +36,7 @@
 #include "IODevice.h"
 #include "RMFT2.h"
 #include "CommandDistributor.h"
+#include "DCCPacket.h"
 
 // This module is responsible for converting API calls into
 // messages to be sent to the waveform generator.
@@ -90,15 +92,12 @@ void DCC::setThrottle( uint16_t cab, uint8_t tSpeed, bool tDirection)  {
   updateLocoReminder(cab, speedCode );
 }
 
-void DCC::setThrottle2( uint16_t cab, byte speedCode)  {
-
-  uint8_t b[4];
-  uint8_t nB = 0;
+void DCC::setThrottle2( uint16_t cab, byte speedCode)  
+{
+  DCCPacket dccPacket;
   // DIAG(F("setSpeedInternal %d %x"),cab,speedCode);
 
-  if (cab > HIGHEST_SHORT_ADDR)
-    b[nB++] = highByte(cab) | 0xC0;    // convert train number into a two-byte address
-  b[nB++] = lowByte(cab);
+  dccPacket.add_cab(cab);
 
   if (globalSpeedsteps <= 28) {
 
@@ -106,43 +105,51 @@ void DCC::setThrottle2( uint16_t cab, byte speedCode)  {
     uint8_t speed28;
     uint8_t code28;
 
-    if (speed128 == 0 || speed128 == 1) { // stop or emergency stop
+    // stop or emergency stop
+    if (speed128 == 0 || speed128 == 1) 
+    {
       code28 = speed128;
-    } else {
-      speed28= (speed128*10+36)/46;                 // convert 2-127 to 1-28
-/*
-      if (globalSpeedsteps <= 14)                   // Don't want to do 14 steps, to get F0 there is ugly
-        code28 = (speed28+3)/2 | (Value of F0);     // convert 1-28 to DCC 14 step speed code
-      else
-*/
-      code28 = (speed28+3)/2 | ( (speed28 & 1) ? 0 : 0b00010000 ); // convert 1-28 to DCC 28 step speed code
+    } 
+    else 
+    {
+      // convert 2-127 to 1-28
+      speed28= (speed128 * 10 + 36) / 46;           
+      
+      // convert 1-28 to DCC 28 step speed code
+      code28 = (speed28 + 3) / 2 | ( (speed28 & 1) ? 0 : 0b00010000 ); 
     }
-    //        Construct command byte from:
-    //        command      speed    direction
-    b[nB++] = 0b01000000 | code28 | ((speedCode & 0x80) ? 0b00100000 : 0);
 
-  } else { // 128 speedsteps
+    // Construct command byte from:
+    //                 command      speed    direction
+    dccPacket.add_byte(0b01000000 | code28 | ((speedCode & 0x80) ? 0b00100000 : 0));
 
-    b[nB++] = SET_SPEED;                      // 128-step speed control byte
-    b[nB++] = speedCode; // for encoding see setThrottle
-
+  } 
+  else // 128 speedsteps
+  {
+    // 128-step speed control byte
+    dccPacket.add_byte(SET_SPEED); 
+    
+    // for encoding see setThrottle
+    dccPacket.add_byte(speedCode); 
   }
 
-  DCCWaveform::mainTrack.schedulePacket(b, nB, 0);
+  DCCWaveform::mainTrack.schedulePacket(&dccPacket, 0);
 }
 
-void DCC::setFunctionInternal(int cab, byte byte1, byte byte2) {
+void DCC::setFunctionInternal(int cab, byte byte1, byte byte2) 
+{
+  DCCPacket dccPacket;
   // DIAG(F("setFunctionInternal %d %x %x"),cab,byte1,byte2);
-  byte b[4];
-  byte nB = 0;
 
-  if (cab > HIGHEST_SHORT_ADDR)
-    b[nB++] = highByte(cab) | 0xC0;    // convert train number into a two-byte address
-  b[nB++] = lowByte(cab);
-  if (byte1!=0) b[nB++] = byte1;
-  b[nB++] = byte2;
+  dccPacket.add_cab(cab);
 
-  DCCWaveform::mainTrack.schedulePacket(b, nB, 0);
+  if (byte1)
+  {
+    dccPacket.add_byte(byte1);
+  }
+  dccPacket.add_byte(byte2);
+
+  DCCWaveform::mainTrack.schedulePacket(&dccPacket, 0);
 }
 
 uint8_t DCC::getThrottleSpeed(int cab) {
@@ -158,44 +165,63 @@ bool DCC::getThrottleDirection(int cab) {
 }
 
 // Set function to value on or off
-void DCC::setFn( int cab, int16_t functionNumber, bool on) {
-  if (cab<=0 ) return;
-
-  if (functionNumber>28) {
-    //non reminding advanced binary bit set
-    byte b[5];
-    byte nB = 0;
-    if (cab > HIGHEST_SHORT_ADDR)
-      b[nB++] = highByte(cab) | 0xC0;    // convert train number into a two-byte address
-    b[nB++] = lowByte(cab);
-    if (functionNumber <= 127) {
-       b[nB++] = 0b11011101;   // Binary State Control Instruction short form
-       b[nB++] = functionNumber | (on ? 0x80 : 0);
-    }
-    else  {
-       b[nB++] = 0b11000000;   // Binary State Control Instruction long form
-       b[nB++] = (functionNumber & 0x7F) | (on ? 0x80 : 0);  // low order bits and state flag
-       b[nB++] = functionNumber >>7 ;  // high order bits
-    }
-    DCCWaveform::mainTrack.schedulePacket(b, nB, 4);
+void DCC::setFn( int cab, int16_t functionNumber, bool on) 
+{
+  if (cab <= 0) 
+  {
     return;
   }
 
-  int reg = lookupSpeedTable(cab);
-  if (reg<0) return;
+  if (functionNumber > 28) 
+  {
+    //non reminding advanced binary bit set
+    DCCPacket dccPacket;
 
-  // Take care of functions:
-  // Set state of function
-  unsigned long previous=speedTable[reg].functions;
-  unsigned long funcmask = (1UL<<functionNumber);
-  if (on) {
-      speedTable[reg].functions |= funcmask;
-  } else {
-      speedTable[reg].functions &= ~funcmask;
+    dccPacket.add_cab(cab);
+
+    if (functionNumber <= 127) 
+    {
+      // Binary State Control Instruction short form
+      dccPacket.add_byte(0b11011101);
+      dccPacket.add_byte(functionNumber | (on ? 0x80 : 0));
+    }
+    else  
+    {
+       // Binary State Control Instruction long form
+       dccPacket.add_byte(0b11000000);   
+       
+       // low order bits and state flag
+       dccPacket.add_byte((functionNumber & 0x7F) | (on ? 0x80 : 0));  
+       
+       // high order bits
+       dccPacket.add_byte(functionNumber >> 7);  
+    }
+    DCCWaveform::mainTrack.schedulePacket(&dccPacket, 4);
   }
-  if (speedTable[reg].functions != previous) {
-    updateGroupflags(speedTable[reg].groupFlags, functionNumber);
-    CommandDistributor::broadcastLoco(reg);
+  else
+  {
+    int reg = lookupSpeedTable(cab);
+    if (reg >= 0)
+    {
+      // Take care of functions:
+      // Set state of function
+      unsigned long previous = speedTable[reg].functions;
+      unsigned long funcmask = (1UL << functionNumber);
+      if (on) 
+      {
+        speedTable[reg].functions |= funcmask;
+      }
+      else 
+      {
+        speedTable[reg].functions &= ~funcmask;
+      }
+
+      if (speedTable[reg].functions != previous) 
+      {
+        updateGroupflags(speedTable[reg].groupFlags, functionNumber);
+        CommandDistributor::broadcastLoco(reg);
+      }
+    }
   }
 }
 
@@ -237,63 +263,66 @@ uint32_t DCC::getFunctionMap(int cab) {
   return (reg<0)?0:speedTable[reg].functions;
 }
 
-void DCC::setAccessory(int address, byte number, bool activate) {
+void DCC::setAccessory(int address, byte number, bool activate) 
+{
   #ifdef DIAG_IO
   DIAG(F("DCC::setAccessory(%d,%d,%d)"), address, number, activate);
   #endif
-  // use masks to detect wrong values and do nothing
-  if(address != (address & 511))
-    return;
-  if(number != (number & 3))
-    return;
-  byte b[2];
+  // use masks to detect right values
+  if (address == (address & 0x01FF) && number == (number & 0x03))
+  {   
+    DCCPacket dccPacket;
 
-  b[0] = address % 64 + 128;                                     // first byte is of the form 10AAAAAA, where AAAAAA represent 6 least signifcant bits of accessory address
-  b[1] = ((((address / 64) % 8) << 4) + (number % 4 << 1) + activate % 2) ^ 0xF8; // second byte is of the form 1AAACDDD, where C should be 1, and the least significant D represent activate/deactivate
+    // first byte is of the form 10AAAAAA, where AAAAAA represent 6 least signifcant bits of accessory address
+    dccPacket.add_byte(address % 64 + 128);
+    // second byte is of the form 1AAACDDD, where C should be 1, and the least significant D represent activate/deactivate
+    dccPacket.add_byte(((((address / 64) % 8) << 4) + (number % 4 << 1) + activate % 2) ^ 0xF8); 
 
-  DCCWaveform::mainTrack.schedulePacket(b, 2, 4);      // Repeat the packet four times
+    // Repeat the packet four times
+    DCCWaveform::mainTrack.schedulePacket(&dccPacket, 4);      
 #if defined(RMFT_ACTIVE)
-  RMFT2::activateEvent(address<<2|number,activate);
+    RMFT2::activateEvent(address<<2|number,activate);
 #endif
+  }
 }
 
 //
 // writeCVByteMain: Write a byte with PoM on main. This writes
 // the 5 byte sized packet to implement this DCC function
 //
-void DCC::writeCVByteMain(int cab, int cv, byte bValue)  {
-  byte b[5];
-  byte nB = 0;
-  if (cab > HIGHEST_SHORT_ADDR)
-    b[nB++] = highByte(cab) | 0xC0;    // convert train number into a two-byte address
+void DCC::writeCVByteMain(int cab, int cv, byte bValue)  
+{
+  DCCPacket dccPacket;
 
-  b[nB++] = lowByte(cab);
-  b[nB++] = cv1(WRITE_BYTE_MAIN, cv); // any CV>1023 will become modulus(1024) due to bit-mask of 0x03
-  b[nB++] = cv2(cv);
-  b[nB++] = bValue;
+  dccPacket.add_cab(cab);
+  
+  // any CV>1023 will become modulus(1024) due to bit-mask of 0x03
+  dccPacket.add_byte(cv1(WRITE_BYTE_MAIN, cv));
+  dccPacket.add_byte(cv2(cv));
+  dccPacket.add_byte(bValue);
 
-  DCCWaveform::mainTrack.schedulePacket(b, nB, 4);
+  DCCWaveform::mainTrack.schedulePacket(&dccPacket, 4);
 }
 
 //
 // writeCVBitMain: Write a bit of a byte with PoM on main. This writes
 // the 5 byte sized packet to implement this DCC function
 //
-void DCC::writeCVBitMain(int cab, int cv, byte bNum, bool bValue)  {
-  byte b[5];
-  byte nB = 0;
+void DCC::writeCVBitMain(int cab, int cv, byte bNum, bool bValue)  
+{
+  DCCPacket dccPacket;
+
   bValue = bValue % 2;
   bNum = bNum % 8;
 
-  if (cab > HIGHEST_SHORT_ADDR)
-    b[nB++] = highByte(cab) | 0xC0;    // convert train number into a two-byte address
+  dccPacket.add_cab(cab);
 
-  b[nB++] = lowByte(cab);
-  b[nB++] = cv1(WRITE_BIT_MAIN, cv); // any CV>1023 will become modulus(1024) due to bit-mask of 0x03
-  b[nB++] = cv2(cv);
-  b[nB++] = WRITE_BIT | (bValue ? BIT_ON : BIT_OFF) | bNum;
+  // any CV>1023 will become modulus(1024) due to bit-mask of 0x03
+  dccPacket.add_byte(cv1(WRITE_BIT_MAIN, cv));   
+  dccPacket.add_byte(cv2(cv));
+  dccPacket.add_byte(WRITE_BIT | (bValue ? BIT_ON : BIT_OFF) | bNum);
 
-  DCCWaveform::mainTrack.schedulePacket(b, nB, 4);
+  DCCWaveform::mainTrack.schedulePacket(&dccPacket, 4);
 }
 
 void DCC::setProgTrackSyncMain(bool on) {
@@ -774,51 +803,44 @@ void DCC::ackManagerLoop() {
           DCCWaveform::progTrack.setAckBaseline();
           callbackState=READY;
           break;
+
       case W0:    // write 0 bit
       case W1:    // write 1 bit
-            {
-	      if (checkResets(RESET_MIN)) return;
-              if (Diag::ACK) DIAG(F("W%d cv=%d bit=%d"),opcode==W1, ackManagerCv,ackManagerBitNum);
-              byte instruction = WRITE_BIT | (opcode==W1 ? BIT_ON : BIT_OFF) | ackManagerBitNum;
-              byte message[] = {cv1(BIT_MANIPULATE, ackManagerCv), cv2(ackManagerCv), instruction };
-              DCCWaveform::progTrack.schedulePacket(message, sizeof(message), PROG_REPEATS);
-              DCCWaveform::progTrack.setAckPending();
-             callbackState=AFTER_WRITE;
-         }
-            break;
+        {
+	        if (checkResets(RESET_MIN)) return;
+          if (Diag::ACK) DIAG(F("W%d cv=%d bit=%d"),opcode==W1, ackManagerCv, ackManagerBitNum);
+          byte instruction = WRITE_BIT | (opcode == W1 ? BIT_ON : BIT_OFF) | ackManagerBitNum;
+          issueCVPacket(BIT_MANIPULATE, instruction);
+          callbackState = AFTER_WRITE;
+          break;
+        }
 
       case WB:   // write byte
-            {
-	      if (checkResets( RESET_MIN)) return;
-              if (Diag::ACK) DIAG(F("WB cv=%d value=%d"),ackManagerCv,ackManagerByte);
-              byte message[] = {cv1(WRITE_BYTE, ackManagerCv), cv2(ackManagerCv), ackManagerByte};
-              DCCWaveform::progTrack.schedulePacket(message, sizeof(message), PROG_REPEATS);
-              DCCWaveform::progTrack.setAckPending();
-              callbackState=AFTER_WRITE;
-            }
-            break;
+        {
+	        if (checkResets(RESET_MIN)) return;
+          if (Diag::ACK) DIAG(F("WB cv=%d value=%d"), ackManagerCv, ackManagerByte);
+          issueCVPacket(WRITE_BYTE, ackManagerByte);
+          callbackState = AFTER_WRITE;
+          break;
+        }
 
       case   VB:     // Issue validate Byte packet
         {
-	  if (checkResets( RESET_MIN)) return;
-          if (Diag::ACK) DIAG(F("VB cv=%d value=%d"),ackManagerCv,ackManagerByte);
-          byte message[] = { cv1(VERIFY_BYTE, ackManagerCv), cv2(ackManagerCv), ackManagerByte};
-          DCCWaveform::progTrack.schedulePacket(message, sizeof(message), PROG_REPEATS);
-          DCCWaveform::progTrack.setAckPending();
+	        if (checkResets(RESET_MIN)) return;
+          if (Diag::ACK) DIAG(F("VB cv=%d value=%d"), ackManagerCv, ackManagerByte);
+          issueCVPacket(VERIFY_BYTE, ackManagerByte);
+          break;
         }
-        break;
 
       case V0:
       case V1:      // Issue validate bit=0 or bit=1  packet
         {
-	  if (checkResets(RESET_MIN)) return;
-          if (Diag::ACK) DIAG(F("V%d cv=%d bit=%d"),opcode==V1, ackManagerCv,ackManagerBitNum);
-          byte instruction = VERIFY_BIT | (opcode==V0?BIT_OFF:BIT_ON) | ackManagerBitNum;
-          byte message[] = {cv1(BIT_MANIPULATE, ackManagerCv), cv2(ackManagerCv), instruction };
-          DCCWaveform::progTrack.schedulePacket(message, sizeof(message), PROG_REPEATS);
-          DCCWaveform::progTrack.setAckPending();
+	        if (checkResets(RESET_MIN)) return;
+          if (Diag::ACK) DIAG(F("V%d cv=%d bit=%d"), opcode == V1, ackManagerCv, ackManagerBitNum);
+          byte instruction = VERIFY_BIT | (opcode == V0 ? BIT_OFF : BIT_ON) | ackManagerBitNum;
+          issueCVPacket(BIT_MANIPULATE, instruction);
+          break;
         }
-        break;
 
       case WACK:   // wait for ack (or absence of ack)
          {
@@ -1022,3 +1044,15 @@ void DCC::displayCabList(Print * stream) {
      StringFormatter::send(stream,F("Used=%d, max=%d\n"),used,MAX_LOCOS);
 
 }
+
+void DCC::issueCVPacket(byte op, byte instruction)
+{
+  DCCPacket dccPacket;
+  
+  dccPacket.add_byte(cv1(op, ackManagerCv));
+  dccPacket.add_byte(cv2(ackManagerCv));
+  dccPacket.add_byte(instruction);
+  DCCWaveform::progTrack.schedulePacket(&dccPacket, PROG_REPEATS);
+  DCCWaveform::progTrack.setAckPending();
+}
+

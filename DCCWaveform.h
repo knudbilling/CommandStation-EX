@@ -4,6 +4,7 @@
  *  © 2021 Fred Decker
  *  © 2020-2021 Harald Barth
  *  © 2020-2021 Chris Harlow
+ *  © 2022 Knud Billing
  *  All rights reserved.
  *  
  *  This file is part of CommandStation-EX
@@ -25,6 +26,7 @@
 #define DCCWaveform_h
 
 #include "MotorDriver.h"
+#include "DCCPacket.h"
 
 // Wait times for power management. Unit: milliseconds
 const int  POWER_SAMPLE_ON_WAIT = 100;
@@ -34,7 +36,6 @@ const int  POWER_SAMPLE_OVERLOAD_WAIT = 20;
 // Number of preamble bits.
 const int   PREAMBLE_BITS_MAIN = 16;
 const int   PREAMBLE_BITS_PROG = 22;
-const byte   MAX_PACKET_SIZE = 5;  // NMRA standard extended packets, payload size WITHOUT checksum.
 
 // The WAVE_STATE enum is deliberately numbered because a change of order would be catastrophic
 // to the transform array.
@@ -84,7 +85,7 @@ class DCCWaveform {
       }
       return tripmA;        
     }
-    void schedulePacket(const byte buffer[], byte byteCount, byte repeats);
+    void schedulePacket(const DCCPacket *dccPacket, byte repeats);
     volatile bool packetPending;
     volatile byte sentResetsSincePacket;
     volatile bool autoPowerOff=false;

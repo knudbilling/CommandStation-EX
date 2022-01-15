@@ -4,6 +4,7 @@
  *  © 2021 Fred Decker
  *  © 2020-2021 Harald Barth
  *  © 2020-2021 Chris Harlow
+ *  © 2022 Knud Billing
  *  All rights reserved.
  *  
  *  This file is part of CommandStation-EX
@@ -28,6 +29,7 @@
 #include "DCCTimer.h"
 #include "DIAG.h"
 #include "freeMemory.h"
+#include "DCCPacket.h"
 
 DCCWaveform  DCCWaveform::mainTrack(PREAMBLE_BITS_MAIN, true);
 DCCWaveform  DCCWaveform::progTrack(PREAMBLE_BITS_PROG, false);
@@ -265,21 +267,22 @@ void DCCWaveform::interrupt2() {
 
 
 // Wait until there is no packet pending, then make this pending
-void DCCWaveform::schedulePacket(const byte buffer[], byte byteCount, byte repeats) {
-  if (byteCount > MAX_PACKET_SIZE) return; // allow for chksum
+void DCCWaveform::schedulePacket(const DCCPacket *dccPacket, byte repeats) 
+{
+  byte i;
+
   while (packetPending);
 
-  byte checksum = 0;
-  for (byte b = 0; b < byteCount; b++) {
-    checksum ^= buffer[b];
-    pendingPacket[b] = buffer[b];
+  for (i = 0; i < dccPacket->length; i++) 
+  {
+    pendingPacket[i] = dccPacket->bytes[i];
   }
   // buffer is MAX_PACKET_SIZE but pendingPacket is one bigger
-  pendingPacket[byteCount] = checksum;
-  pendingLength = byteCount + 1;
+  pendingPacket[i] = dccPacket->errorDetection;
+  pendingLength = i + 1;
   pendingRepeats = repeats;
   packetPending = true;
-  sentResetsSincePacket=0;
+  sentResetsSincePacket = 0;
 }
 
 // Operations applicable to PROG track ONLY.
